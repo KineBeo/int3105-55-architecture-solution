@@ -28,13 +28,18 @@ const createConcurrentPipeline = (numOCRInstances) => {
             const inputs = Array(numInputs).fill(fixedImagePath);
 
             // Distribute inputs across OCR filters
+            // Simulates parallel processing on multiple servers
             const ocrPromises = inputs.map((input, index) => {
                 const ocrFilter = ocrFilters[index % numOCRInstances];
                 return ocrFilter.process(input);
             });
 
+            // TEST: OCR benchmarking
+            const ocrStartTime = Date.now();
             // Process OCR in parallel
             const ocrResults = await Promise.all(ocrPromises);
+            const ocrEndTime = Date.now();
+            console.log('OCR processing time:', ocrEndTime - ocrStartTime, 'ms');
 
             // Create sequential pipelines for remaining filters
             const pipeline = new Pipeline()
@@ -51,7 +56,7 @@ const createConcurrentPipeline = (numOCRInstances) => {
     };
 };
 
-async function processConcurrent(req, res) {
+async function processConcurrentWithBenchmarking(req, res) {
     try {
         // TEST: Check if request reaches this router.
         console.log('Request received.')
@@ -68,10 +73,11 @@ async function processConcurrent(req, res) {
         console.log('File uploaded:', req.file);
         console.log('File path:', req.file.path);
 
-        const pipeline = createConcurrentPipeline(1);
+        const pipeline = createConcurrentPipeline(3);
+
         // TEST: Start benchmarking.
         const startTime = Date.now();
-        const pdfPaths = await pipeline.process(req.file.path, 5);
+        const pdfPaths = await pipeline.process(req.file.path, 9);
         // TEST: End benchmarking.
         const endTime = Date.now();
 
@@ -91,7 +97,7 @@ async function processConcurrent(req, res) {
         //     //     console.error('Cleanup error:', cleanupErr);
         //     // }
         // });
-        console.log('Processing time:', endTime - startTime, 'ms');
+        console.log('Total processing time:', endTime - startTime, 'ms');
     } catch (error) {
         console.error('Processing error:', error);
         res.status(500).json({ error: 'Error processing image' });
@@ -109,7 +115,7 @@ async function processConcurrent(req, res) {
 }
 
 router.post('/', async (req, res) => {
-    processConcurrent(req, res);
+    processConcurrentWithBenchmarking(req, res);
 });
 
 module.exports = router;
