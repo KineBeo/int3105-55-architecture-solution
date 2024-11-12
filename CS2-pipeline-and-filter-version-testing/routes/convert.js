@@ -19,44 +19,83 @@ const path = require('path');
 // };
 
 // TEST: Create a concurrent processing pipeline for testing.
-const createConcurrentPipeline = (numOCRInstances) => {
+const createConcurrentPipelineWithBenchmarking = (numOCRInstances) => {
     const ocrFilters = Array.from({ length: numOCRInstances },
-        (_, i) => new OCRFilter());
+        (_, i) => new OCRFilter(`OCR-${i + 1}`));
 
     return {
         async process(fixedImagePath, numInputs) {
+            const startTime = Date.now();
             const inputs = Array(numInputs).fill(fixedImagePath);
 
-            // Distribute inputs across OCR filters
-            // Simulates parallel processing on multiple servers
-            const ocrPromises = inputs.map((input, index) => {
-                const ocrFilter = ocrFilters[index % numOCRInstances];
-                return ocrFilter.process(input);
+            const ocrStartTime = Date.now();
+
+            // Process inputs in chunks based on number of OCR instances
+            const ocrResults = [];
+            for (let i = 0; i < inputs.length; i += numOCRInstances) {
+                const chunk = inputs.slice(i, i + numOCRInstances);
+                const chunkPromises = chunk.map((input, chunkIndex) => {
+                    const ocrFilter = ocrFilters[chunkIndex];
+                    return ocrFilter.process(input)
+                        .then(result => ({
+                            instanceId: ocrFilter.id,
+                            inputIndex: i + chunkIndex,
+                            result
+                        }));
+                });
+                // Process each chunk concurrently, but wait for chunk to complete
+                const chunkResults = await Promise.all(chunkPromises);
+                ocrResults.push(...chunkResults);
+            }
+
+            const ocrEndTime = Date.now();
+
+            // Log instance utilization
+            const instanceUtilization = new Map();
+            ocrResults.forEach(({ instanceId }) => {
+                instanceUtilization.set(instanceId,
+                    (instanceUtilization.get(instanceId) || 0) + 1);
             });
 
-            // TEST: OCR benchmarking
-            const ocrStartTime = Date.now();
-            // Process OCR in parallel
-            const ocrResults = await Promise.all(ocrPromises);
-            const ocrEndTime = Date.now();
-            console.log('OCR processing time:', ocrEndTime - ocrStartTime, 'ms');
-
-            // Create sequential pipelines for remaining filters
             const pipeline = new Pipeline()
                 .addFilter(new TranslationFilter())
                 .addFilter(new PDFFilter());
 
-            // Process remaining filters
             const finalResults = await Promise.all(
-                ocrResults.map(result => pipeline.process(result))
+                ocrResults.map(({ result }) => pipeline.process(result))
             );
+
+            const endTime = Date.now();
+
+            // Enhanced benchmarking results
+            const benchmarkingResult = {
+                numInputs,
+                numOCRInstances,
+                OCRProcessingTime: ocrEndTime - ocrStartTime,
+                totalProcessingTime: endTime - startTime,
+                averageTimePerInput: (endTime - startTime) / numInputs,
+                instanceUtilization: Object.fromEntries(instanceUtilization),
+                theoreticalMaxParallel: Math.min(numInputs, numOCRInstances),
+                actualSpeedup: (OCRFilter.averageProcessingTime * numInputs) / (ocrEndTime - ocrStartTime)
+            };
+
+            console.log('\nConcurrent Pipes and Filters Implementation');
+            console.log(`Number of inputs: ${benchmarkingResult.numInputs}`);
+            console.log(`Number of OCR instances: ${benchmarkingResult.numOCRInstances}`);
+            console.log(`OCR processing time: ${benchmarkingResult.OCRProcessingTime} ms`);
+            console.log(`Total processing time: ${benchmarkingResult.totalProcessingTime} ms`);
+            console.log(`Average time per input: ${benchmarkingResult.averageTimePerInput} ms`);
+            console.log('Instance utilization:', benchmarkingResult.instanceUtilization);
+            console.log(`Theoretical speedup: ${benchmarkingResult.theoreticalMaxParallel}x`);
+            console.log(`Actual speedup: ${benchmarkingResult.actualSpeedup.toFixed(2)}x`);
 
             return finalResults;
         }
     };
 };
-
-async function processConcurrentWithBenchmarking(req, res) {
+async function processConcurrent(req, res) {
+    const numInputs = 9;
+    const numOCRInstances = 1;
     try {
         // TEST: Check if request reaches this router.
         console.log('Request received.')
@@ -71,15 +110,10 @@ async function processConcurrentWithBenchmarking(req, res) {
 
         // RESEARCH: Check req.file.path structure.
         console.log('File uploaded:', req.file);
-        console.log('File path:', req.file.path);
 
-        const pipeline = createConcurrentPipeline(3);
+        const pipeline = createConcurrentPipelineWithBenchmarking(numOCRInstances);
+        const pdfPaths = await pipeline.process(req.file.path, numInputs);
 
-        // TEST: Start benchmarking.
-        const startTime = Date.now();
-        const pdfPaths = await pipeline.process(req.file.path, 9);
-        // TEST: End benchmarking.
-        const endTime = Date.now();
 
         // TEST: Send the paths of the saved files as the response
         res.status(200).json({ files: pdfPaths });
@@ -97,7 +131,6 @@ async function processConcurrentWithBenchmarking(req, res) {
         //     //     console.error('Cleanup error:', cleanupErr);
         //     // }
         // });
-        console.log('Total processing time:', endTime - startTime, 'ms');
     } catch (error) {
         console.error('Processing error:', error);
         res.status(500).json({ error: 'Error processing image' });
@@ -115,7 +148,7 @@ async function processConcurrentWithBenchmarking(req, res) {
 }
 
 router.post('/', async (req, res) => {
-    processConcurrentWithBenchmarking(req, res);
+    processConcurrent(req, res);
 });
 
 module.exports = router;
