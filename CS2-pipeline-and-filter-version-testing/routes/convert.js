@@ -51,7 +51,7 @@ const createConcurrentPipeline = (numOCRInstances) => {
     };
 };
 
-router.post('/', async (req, res) => {
+async function processConcurrent(req, res) {
     try {
         // TEST: Check if request reaches this router.
         console.log('Request received.')
@@ -69,7 +69,11 @@ router.post('/', async (req, res) => {
         console.log('File path:', req.file.path);
 
         const pipeline = createConcurrentPipeline(1);
+        // TEST: Start benchmarking.
+        const startTime = Date.now();
         const pdfPaths = await pipeline.process(req.file.path, 5);
+        // TEST: End benchmarking.
+        const endTime = Date.now();
 
         // TEST: Send the paths of the saved files as the response
         res.status(200).json({ files: pdfPaths });
@@ -87,7 +91,7 @@ router.post('/', async (req, res) => {
         //     //     console.error('Cleanup error:', cleanupErr);
         //     // }
         // });
-
+        console.log('Processing time:', endTime - startTime, 'ms');
     } catch (error) {
         console.error('Processing error:', error);
         res.status(500).json({ error: 'Error processing image' });
@@ -102,6 +106,10 @@ router.post('/', async (req, res) => {
         //     }
         // }
     }
+}
+
+router.post('/', async (req, res) => {
+    processConcurrent(req, res);
 });
 
 module.exports = router;
