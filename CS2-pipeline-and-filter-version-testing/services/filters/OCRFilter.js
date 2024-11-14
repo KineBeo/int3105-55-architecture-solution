@@ -13,12 +13,14 @@ class OCRFilter extends Filter {
 
     async process(imagePath) {
         // Simulate varying processing times to better demonstrate concurrency
-        const processingTime = OCRFilter.fixedProcessingTime + Math.random() * OCRFilter.variatingProcessingTime; // Base 5s + random variation
         const formattedDate = new Date().toLocaleString();
-        await new Promise(resolve => setTimeout(resolve, processingTime));
 
+        const startTime = Date.now();
+        const result = await ocr.image2text(imagePath);
+        const endTime = Date.now();
+        const processingTime = endTime - startTime;
         console.log(`OCR Instance ${this.id} processed image in ${processingTime}ms at ${formattedDate}`);
-        return await ocr.image2text(imagePath);
+        return result;
     }
 }
 

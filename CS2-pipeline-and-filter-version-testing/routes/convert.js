@@ -94,8 +94,8 @@ const createConcurrentPipelineWithBenchmarking = (numOCRInstances) => {
     };
 };
 async function processConcurrent(req, res) {
-    const numInputs = 9;
-    const numOCRInstances = 1;
+    const numInputs = 30;
+    const numOCRInstances = 10;
     try {
         // TEST: Check if request reaches this router.
         console.log('Request received.')
