@@ -1,0 +1,11 @@
+{
+  "dependencies": {
+    "amqplib": "^0.10.4",
+    "express": "^4.21.1",
+    "express-rate-limit": "^7.4.1",
+    "multer": "^1.4.5-lts.1",
+    "node-tesseract-ocr": "^2.2.1",
+    "open-google-translator": "^1.0.5",
+    "pdfkit": "^0.15.1"
+  }
+}
