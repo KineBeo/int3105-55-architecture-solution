@@ -20,28 +20,14 @@ async function cleanupFile(filePath) {
     }
 }
 
-router.post('/', upload.single('image'), async (req, res) => {
+router.post('/', async (req, res) => {
+    const filePath = 'uploads/PngExample.png';
     try {
-        if (!req.file) {
-            return res.status(400).json({ error: 'No image file uploaded' });
-        }
-
-        const pdfPath = await processImage(req.file.path);
-        
-        res.download(pdfPath, 'translated.pdf', async (err) => {
-            if (err) {
-                console.error('Error sending file:', err);
-            }
-            await cleanupFile(req.file.path);
-        });
-
+        await processImage(filePath);
+        res.status(200).json({ message: 'Image processed successfully' });
     } catch (error) {
         console.error('Processing error:', error);
         res.status(500).json({ error: 'Error processing image' });
-        
-        if (req.file) {
-            await cleanupFile(req.file.path);
-        }
     }
 });
 
