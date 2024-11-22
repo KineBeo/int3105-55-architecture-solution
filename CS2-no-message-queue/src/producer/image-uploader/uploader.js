@@ -12,9 +12,13 @@ const UPLOAD_LIMIT_MESSAGE = "Too many uploads from this IP, please try again la
 
 const BATCH_SIZE = 50;
 const MAX_FILES = 1000;
-const DELAY_BETWEEN_BATCHES = 10000; // milliseconds
+const DELAY_BETWEEN_BATCHES = 5000; // milliseconds
 
 const CONSUMER_URL = process.env.CONSUMER_URL || "http://localhost:3001";
+
+// STATES
+let producerTimeline = [];
+let firstBatchTime = null;
 
 // HELPER FUNCTIONS
 const createFileInfo = (file) => ({
@@ -40,12 +44,18 @@ const sendToConsumer = async (fileInfo) => {
 };
 
 const processBatch = async (batch) => {
+  // Initialize firstBatchTime if this is the first batch
+  if (firstBatchTime === null) {
+    firstBatchTime = Date.now();
+  }
+
+  // Notify current batch being processed
   console.log(`Processing batch of ${batch.length} files...`);
   
   // Create array of promises for concurrent execution
   const promises = batch.map(async (file) => {
-    const fileInfo = createFileInfo(file);
     try {
+      const fileInfo = createFileInfo(file);
       const result = await sendToConsumer(fileInfo);
       return result.filename;
     } catch (error) {
@@ -55,10 +65,17 @@ const processBatch = async (batch) => {
 
   // Execute all promises concurrently
   const results = await Promise.all(promises);
-  
+
+  // Add timeline entry
+  producerTimeline.push({
+    time: Math.round((Date.now() - firstBatchTime) / 1000 * 100) / 100,
+    requests_sent: batch.length
+  });
+
   // Filter out failed requests (null values)
   return results.filter(result => result !== null);
 };
+
 const delay = () => new Promise(resolve => 
   setTimeout(resolve, DELAY_BETWEEN_BATCHES)
 );
@@ -106,9 +123,11 @@ app.post('/upload/batch',
                 await delay();
             }
 
-            console.log(`${results.length} files sent to consumer for processing`);
+            // Print timeline after all batches are processed
+            console.log('Producer Timeline:');
+            console.log(JSON.stringify(producerTimeline, null, 2));
             res.json({
-              message: `${results.length} files sent to consumer for processing`,
+              message: `${results.length} files received by consumer for processing`,
               files: results
             });
         } catch (error) {
