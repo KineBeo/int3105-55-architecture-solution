@@ -6,11 +6,27 @@ const { createPDF } = require("./services/pdf");
 const path = require("path");
 const fs = require("fs");
 
+// Request limiting mechanism
+const MAX_CONCURRENT_REQUESTS = 3; // Maximum number of concurrent requests
+let currentRequests = 0;
+
 const app = express();
 app.use(express.json());
 
 // HTTP endpoint that receives direct requests from producer.
 app.post('/process', async (req, res) => {
+  // Check if we've reached the maximum number of concurrent requests
+  if (currentRequests >= MAX_CONCURRENT_REQUESTS) {
+    console.log(`[Request Rejected] Maximum concurrent requests (${MAX_CONCURRENT_REQUESTS}) reached. Try again later.`);
+    return res.status(503).json({
+      success: false,
+      message: 'Server is busy. Please try again later.'
+    });
+  }
+
+  // Increment the counter before processing
+  currentRequests++;
+
   try {
     const fileInfo = req.body;
     console.log("[Direct Request] Processing file:", fileInfo.originalPath);
@@ -44,6 +60,9 @@ app.post('/process', async (req, res) => {
       success: false,
       error: error.message 
     });
+  } finally {
+    // Decrement the counter after processing
+    currentRequests--;
   }
 });
 
