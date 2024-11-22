@@ -10,7 +10,7 @@ const UPLOAD_LIMIT_WINDOW_MS = 60 * 1000; // 1 minute
 const UPLOAD_LIMIT_MAX_REQUESTS = 100;
 const UPLOAD_LIMIT_MESSAGE = "Too many uploads from this IP, please try again later";
 
-const BATCH_FLUNCTUATIONS = [50, 10, 25]
+const BATCH_FLUNCTUATIONS = [5, 1, 2];
 const MAX_FILES = 1000;
 const DELAY_BETWEEN_BATCHES = 5000; // milliseconds
 
@@ -44,11 +44,6 @@ const sendToConsumer = async (fileInfo) => {
 };
 
 const processBatch = async (batch) => {
-  // Initialize firstBatchTime if this is the first batch
-  if (firstBatchTime === null) {
-    firstBatchTime = Date.now();
-  }
-
   // Notify current batch being processed
   console.log(`Processing batch of ${batch.length} files...`);
   
@@ -63,14 +58,21 @@ const processBatch = async (batch) => {
     }
   });
 
-  // Execute all promises concurrently
-  const results = await Promise.all(promises);
+
+  const batchSentTime = firstBatchTime === null ? 0 : Math.round((Date.now() - firstBatchTime) / 1000 * 100) / 100;
+  if (firstBatchTime === null) {
+    firstBatchTime = Date.now();
+  }
 
   // Add timeline entry
   producerTimeline.push({
-    time: Math.round((Date.now() - firstBatchTime) / 1000 * 100) / 100,
+    time: batchSentTime,
     requests_sent: batch.length
   });
+
+  // Send batch concurrently
+  const results = await Promise.all(promises);
+
 
   // Filter out failed requests (null values)
   return results.filter(result => result !== null);
