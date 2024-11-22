@@ -41,15 +41,26 @@ const sendToConsumer = async (fileInfo) => {
 };
 
 const processBatch = async (batch) => {
-  const results = [];
-  for (const file of batch) {
+  console.log(`Processing batch of ${batch.length} files...`);
+  
+  // Create array of promises for concurrent execution
+  const promises = batch.map(async (file) => {
     const fileInfo = createFileInfo(file);
-    const result = await sendToConsumer(fileInfo);
-    results.push(result.filename);
-  }
-  return results;
-};
+    try {
+      const result = await sendToConsumer(fileInfo);
+      return result.filename;
+    } catch (error) {
+      console.error(`Failed to process file ${file.filename}:`, error.message);
+      return null;
+    }
+  });
 
+  // Execute all promises concurrently
+  const results = await Promise.all(promises);
+  
+  // Filter out failed requests (null values)
+  return results.filter(result => result !== null);
+};
 const delay = () => new Promise(resolve => 
   setTimeout(resolve, DELAY_BETWEEN_BATCHES)
 );
@@ -94,9 +105,10 @@ app.post('/upload/batch',
                 await delay();
             }
 
+            console.log(`${results.length} files sent to consumer for processing`);
             res.json({
-                message: `${results.length} sent to consumer for processing`,
-                files: results
+              message: `${results.length} files sent to consumer for processing`,
+              files: results
             });
         } catch (error) {
             console.error('Upload error:', error);
