@@ -11,6 +11,7 @@ const UPLOAD_LIMIT_MAX_REQUESTS = 100;
 const UPLOAD_LIMIT_MESSAGE = "Too many uploads from this IP, please try again later";
 
 const BATCH_SIZE = 50;
+const BATCH_FLUNCTUATIONS = [50, 10, 25]
 const MAX_FILES = 1000;
 const DELAY_BETWEEN_BATCHES = 5000; // milliseconds
 
@@ -112,15 +113,19 @@ app.post('/upload/batch',
         try {
             const files = validateFiles(req.files);
             const results = [];
-
-            for (let i = 0; i < files.length; i += BATCH_SIZE) {
-                const batch = files.slice(i, i + BATCH_SIZE);
+            let currentBatchSize = BATCH_FLUNCTUATIONS[Math.floor(Math.random() * BATCH_FLUNCTUATIONS.length)];
+            for (let i = 0; i < files.length;) {
+                const batch = files.slice(i, i + currentBatchSize);
                 processBatch(batch).then(batchResults => {
                   results.push(...batchResults);
                 }).catch(error => {
                   console.error('Batch processing error:', error);
                 });
                 await delay();
+
+                // Update i and currentBatchSize for next batch
+                i += currentBatchSize;
+                currentBatchSize = BATCH_FLUNCTUATIONS[Math.floor(Math.random() * BATCH_FLUNCTUATIONS.length)];
             }
 
             // Print timeline after all batches are processed
