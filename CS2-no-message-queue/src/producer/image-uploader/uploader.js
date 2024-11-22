@@ -12,7 +12,7 @@ const UPLOAD_LIMIT_MESSAGE = "Too many uploads from this IP, please try again la
 
 const BATCH_SIZE = 50;
 const MAX_FILES = 1000;
-const DELAY_BETWEEN_BATCHES = 100; // milliseconds
+const DELAY_BETWEEN_BATCHES = 10000; // milliseconds
 
 const CONSUMER_URL = process.env.CONSUMER_URL || "http://localhost:3001";
 
@@ -35,7 +35,6 @@ const sendToConsumer = async (fileInfo) => {
     const response = await axios.post(`${CONSUMER_URL}/process`, fileInfo);
     return response.data;
   } catch (error) {
-    console.error('Error sending to consumer:', error);
     throw new Error('Failed to send file to consumer');
   }
 };
@@ -50,7 +49,6 @@ const processBatch = async (batch) => {
       const result = await sendToConsumer(fileInfo);
       return result.filename;
     } catch (error) {
-      console.error(`Failed to process file ${file.filename}:`, error.message);
       return null;
     }
   });
@@ -100,8 +98,11 @@ app.post('/upload/batch',
 
             for (let i = 0; i < files.length; i += BATCH_SIZE) {
                 const batch = files.slice(i, i + BATCH_SIZE);
-                const batchResults = await processBatch(batch);
-                results.push(...batchResults);
+                processBatch(batch).then(batchResults => {
+                  results.push(...batchResults);
+                }).catch(error => {
+                  console.error('Batch processing error:', error);
+                });
                 await delay();
             }
 
@@ -111,7 +112,6 @@ app.post('/upload/batch',
               files: results
             });
         } catch (error) {
-            console.error('Upload error:', error);
             res.status(500).send('Error processing upload');
         }
     }
