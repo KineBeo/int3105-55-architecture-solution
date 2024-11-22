@@ -1,12 +1,73 @@
 const express = require("express");
 const multer = require("multer");
 const amqp = require("amqplib");
-const path = require("path");
-const fs = require("fs");
 const rateLimit = require("express-rate-limit");
 const app = express();
 
-// Cấu hình multer để lưu file upload với tên file gốc
+// CONSTANTS
+const MAX_FILE_SIZE = 5 * 1024 * 1024; // 5MB
+
+const RABBITMQ_URL = "amqp://localhost";
+const RABBITMQ_QUEUE = "queue-based-load-leveling";
+const RABBITMQ_QUEUE_TTL = 24 * 60 * 60 * 1000; // 24 hours
+const RABBITMQ_MAX_LENGTH = 10000;
+const RABBITMQ_OVERFLOW = "reject-publish";
+
+const UPLOAD_LIMIT_WINDOW_MS = 60 * 1000; // 1 minute
+const UPLOAD_LIMIT_MAX_REQUESTS = 100;
+const UPLOAD_LIMIT_MESSAGE = "Too many uploads from this IP, please try again later";
+
+const BATCH_SIZE = 50;
+const MAX_FILES = 1000;
+const DELAY_BETWEEN_BATCHES = 100; // milliseconds
+const LARGE_FILE_SIZE = 1024 * 1024; // 1MB
+const HIGH_PRIORITY = 1;
+const LOW_PRIORITY = 2;
+
+// HELPER FUNCTIONS
+const createFileInfo = (file) => ({
+  originalPath: file.path,
+  filename: file.filename,
+  timestamp: Date.now()
+});
+
+const validateFiles = (files) => {
+  if (!files || files.length === 0) {
+      throw new Error('No files uploaded.');
+  }
+  return files;
+}
+
+const getMessagePriority = (fileSize) => 
+  fileSize > LARGE_FILE_SIZE ? HIGH_PRIORITY : LOW_PRIORITY;
+
+const queueFile = async (channel, fileInfo, fileSize) => {
+  await channel.sendToQueue(
+      RABBITMQ_CONFIG.queue,
+      Buffer.from(JSON.stringify(fileInfo)),
+      {
+          persistent: true,
+          priority: getMessagePriority(fileSize)
+      }
+  );
+  return fileInfo.filename;
+};
+
+const processBatch = async (batch, channel) => {
+  const results = [];
+  for (const file of batch) {
+      const fileInfo = createFileInfo(file);
+      const filename = await queueFile(channel, fileInfo, file.size);
+      results.push(filename);
+  }
+  return results;
+};
+
+const delay = () => new Promise(resolve => 
+  setTimeout(resolve, DELAY_BETWEEN_BATCHES)
+);
+
+// MAIN IMPLEMENTATION
 const storage = multer.diskStorage({
   destination: function (req, file, cb) {
     cb(null, "src/producer/uploads/");
@@ -19,27 +80,27 @@ const storage = multer.diskStorage({
 const upload = multer({
   storage: storage,
   limits: {
-    fileSize: 5 * 1024 * 1024, // 5MB
+    fileSize: MAX_FILE_SIZE,
   },
 });
 
 const RABBITMQ_CONFIG = {
-  url: "amqp://localhost",
-  queue: "queue-based-load-leveling",
+  url: RABBITMQ_URL,
+  queue: RABBITMQ_QUEUE,
   queueOptions: {
     durable: true,
     arguments: {
-      "x-message-ttl": 24 * 60 * 60 * 1000, // 24 hours
-      "x-max-length": 10000,
-      "x-overflow": "reject-publish",
+      "x-message-ttl": RABBITMQ_QUEUE_TTL,
+      "x-max-length": RABBITMQ_MAX_LENGTH,
+      "x-overflow": RABBITMQ_OVERFLOW,
     },
   },
 };
 
 const uploadLimiter = rateLimit({
-  windowMs: 60 * 1000, // 1 minute
-  max: 100, // limit each IP to 100 requests per minute
-  message: "Too many uploads from this IP, please try again later",
+  windowMs: UPLOAD_LIMIT_WINDOW_MS,
+  max: UPLOAD_LIMIT_MAX_REQUESTS,
+  message: UPLOAD_LIMIT_MESSAGE,
 });
 
 // Khởi tạo kết nối AMQP
@@ -59,82 +120,31 @@ async function connectQueue() {
 
 connectQueue();
 
-app.post("/upload", upload.single("image"), async (req, res) => {
-  if (!req.file) {
-    return res.status(400).send("No file uploaded.");
-  }
+// Batch upload
+app.post('/upload/batch',
+    uploadLimiter,
+    upload.array('images', MAX_FILES),
+    async (req, res) => {
+        try {
+            const files = validateFiles(req.files);
+            const results = [];
 
-  // Lưu thông tin file
-  const fileInfo = {
-    originalPath: req.file.path,
-    filename: req.file.filename,
-  };
+            for (let i = 0; i < files.length; i += BATCH_SIZE) {
+                const batch = files.slice(i, i + BATCH_SIZE);
+                const batchResults = await processBatch(batch, channel);
+                results.push(...batchResults);
+                await delay();
+            }
 
-  console.log("filepath:", fileInfo.originalPath);
-  // Gửi thông tin file vào queue
-  channel.sendToQueue(
-    "image-processing-queue",
-    Buffer.from(JSON.stringify(fileInfo)),
-    {
-      persistent: true,
+            res.json({
+                message: `${results.length} files queued for processing`,
+                files: results
+            });
+        } catch (error) {
+            console.error('Upload error:', error);
+            res.status(500).send('Error processing upload');
+        }
     }
-  );
-
-  res.json({
-    message: "File uploaded and sent for processing",
-    fileId: req.file.filename,
-    filePath: req.file.path,
-  });
-});
-
-app.post('/upload/batch', 
-  uploadLimiter,
-  upload.array('images', 1000),
-  async (req, res) => {
-      if (!req.files || req.files.length === 0) {
-          return res.status(400).send('No files uploaded.');
-      }
-
-      try {
-          const batchSize = 50;
-          const files = req.files;
-          const results = [];
-
-          for (let i = 0; i < files.length; i += batchSize) {
-              const batch = files.slice(i, i + batchSize);
-              
-              for (const file of batch) {
-                  const fileInfo = {
-                      originalPath: file.path,
-                      filename: file.filename,
-                      timestamp: Date.now()
-                  };
-
-                  await channel.sendToQueue(
-                      RABBITMQ_CONFIG.queue,
-                      Buffer.from(JSON.stringify(fileInfo)),
-                      {
-                          persistent: true,
-                          priority: file.size > 1024 * 1024 ? 1 : 2
-                      }
-                  );
-
-                  results.push(fileInfo.filename);
-              }
-
-              // Add delay between batches
-              await new Promise(resolve => setTimeout(resolve, 100));
-          }
-
-          res.json({
-              message: `${results.length} files queued for processing`,
-              files: results
-          });
-      } catch (error) {
-          console.error('Upload error:', error);
-          res.status(500).send('Error processing upload');
-      }
-  }
 );
 
 const PORT = process.env.PORT || 3000;
