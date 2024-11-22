@@ -10,7 +10,6 @@ const UPLOAD_LIMIT_WINDOW_MS = 60 * 1000; // 1 minute
 const UPLOAD_LIMIT_MAX_REQUESTS = 100;
 const UPLOAD_LIMIT_MESSAGE = "Too many uploads from this IP, please try again later";
 
-const BATCH_SIZE = 50;
 const BATCH_FLUNCTUATIONS = [50, 10, 25]
 const MAX_FILES = 1000;
 const DELAY_BETWEEN_BATCHES = 5000; // milliseconds

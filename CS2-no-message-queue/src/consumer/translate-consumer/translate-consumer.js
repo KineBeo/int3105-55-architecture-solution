@@ -7,16 +7,32 @@ const path = require("path");
 const fs = require("fs");
 
 // Request limiting mechanism
-const MAX_CONCURRENT_REQUESTS = 3; // Maximum number of concurrent requests
-let currentRequests = 0;
+const MAX_CONCURRENT_REQUESTS = 5; // Maximum number of concurrent requests
+
 
 const app = express();
 app.use(express.json());
 
+
+// STATES
+let previousIgnoredRequests = 0;
+let totalIgnoredRequests = 0;
+let currentRequests = 0;
+let consumerTimeline = [];
+let firstRequestTime = null;
+let previousTotalProcessedRequests = 0;
+let totalProcessedRequests = 0;
+
 // HTTP endpoint that receives direct requests from producer.
 app.post('/process', async (req, res) => {
+  // Initialize firstRequestTime if this is the first request
+  if (firstRequestTime === null) {
+    firstRequestTime = Date.now();
+  }
+
   // Check if we've reached the maximum number of concurrent requests
   if (currentRequests >= MAX_CONCURRENT_REQUESTS) {
+    totalIgnoredRequests++;
     console.log(`[Request Rejected] Maximum concurrent requests (${MAX_CONCURRENT_REQUESTS}) reached. Try again later.`);
     return res.status(503).json({
       success: false,
@@ -48,6 +64,7 @@ app.post('/process', async (req, res) => {
     await createPDF(vietnameseText, outputPath);
     console.log("[Direct Request] Successfully processed file:", fileInfo.filename);
 
+    totalProcessedRequests++; // Add this line before sending success response
     res.json({ 
       success: true,
       filename: fileInfo.filename,
@@ -63,16 +80,36 @@ app.post('/process', async (req, res) => {
   } finally {
     // Decrement the counter after processing
     currentRequests--;
+    if (currentRequests === 0) {
+      updateTimeline();
+    }
   }
 });
 
-// Graceful shutdown
-process.on("SIGINT", () => {
-  console.log("Shutting down server...");
-  process.exit(0);
-});
 
 const PORT = process.env.PORT || 3001;
 app.listen(PORT, () => {
   console.log(`Consumer service running on port ${PORT}`);
+});
+
+const updateTimeline = () => {
+  if (firstRequestTime !== null) {
+    consumerTimeline.push({
+      time: Math.round((Date.now() - firstRequestTime) / 1000 * 100) / 100,
+      requests_processed: totalProcessedRequests - previousTotalProcessedRequests,
+      requests_ignored: totalIgnoredRequests - previousIgnoredRequests
+    });
+    
+    previousIgnoredRequests = totalIgnoredRequests;
+    previousTotalProcessedRequests = totalProcessedRequests;
+  }
+};
+
+
+// Graceful shutdown
+process.on("SIGINT", () => {
+  console.log("Shutting down server...");
+  console.log('\nConsumer Timeline:');
+  console.log(JSON.stringify(consumerTimeline, null, 2));
+  process.exit(0);
 });
