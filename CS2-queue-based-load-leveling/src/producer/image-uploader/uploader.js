@@ -7,6 +7,7 @@ const rateLimit = require("express-rate-limit");
 const app = express();
 // CONSTANTS
 const MAX_FILES_PER_REQUEST = 1000;
+const DELAY_BETWEEN_BATCHES = 5000;
 const BATCH_SIZES = [5, 1, 2, 10, 20];
 
 // HELPER FUNCTIONS
@@ -14,6 +15,27 @@ const getBatchSize = () => {
   const randomIndex = Math.floor(Math.random() * BATCH_SIZES.length);
   return BATCH_SIZES[randomIndex];
 };
+
+const getEntryTime = () => {
+  return producerTimeline.length > 0 ? parseFloat(((Date.now() - firstTimelineEntryTime) / 1000).toFixed(2)) : 0;
+}
+// STATES
+const producerTimeline = [];
+let currentBatchSize = getBatchSize();
+let firstTimelineEntryTime = null;
+
+const pushTimelineEntry = () => {
+  // If this is the first entry, set the first entry time.
+  if (producerTimeline.length === 0) {
+    firstTimelineEntryTime = Date.now();
+  }
+  const entry = {
+    time: getEntryTime(),
+    requests_sent: currentBatchSize,
+  };
+  producerTimeline.push(entry);
+}
+
 
 // Cấu hình multer để lưu file upload với tên file gốc
 const storage = multer.diskStorage({
@@ -77,38 +99,44 @@ app.post('/upload/batch',
       }
 
       try {
-          const currentBatchSize = getBatchSize();
           const files = req.files;
           const results = [];
 
           for (let i = 0; i < files.length;) {
-                const batch = files.slice(i, i + currentBatchSize);
-                i += batch.length;
-              
-              for (const file of batch) {
-                  const fileInfo = {
-                      originalPath: file.path,
-                      filename: file.filename,
-                      timestamp: Date.now()
-                  };
-                  // TODO: Push a timeline entry.
+            const batch = files.slice(i, i + currentBatchSize);
+            currentBatchSize = batch.length;
+            i += currentBatchSize;
 
-                  await channel.sendToQueue(
-                      RABBITMQ_CONFIG.queue,
-                      Buffer.from(JSON.stringify(fileInfo)),
-                      {
-                          persistent: true,
-                          priority: file.size > 1024 * 1024 ? 1 : 2
-                      }
-                  );
+            pushTimelineEntry();
+            for (const file of batch) {
+                const fileInfo = {
+                    originalPath: file.path,
+                    filename: file.filename,
+                    timestamp: Date.now()
+                };
+                
+                // Request sent
+                
+                await channel.sendToQueue(
+                    RABBITMQ_CONFIG.queue,
+                    Buffer.from(JSON.stringify(fileInfo)),
+                    {
+                        persistent: true,
+                        priority: file.size > 1024 * 1024 ? 1 : 2
+                    }
+                );
 
-                  results.push(fileInfo.filename);
-              }
+                results.push(fileInfo.filename);
+            }
 
-              // Add delay between batches
-              await new Promise(resolve => setTimeout(resolve, 100));
+            // Add delay between batches
+            await new Promise(resolve => setTimeout(resolve, DELAY_BETWEEN_BATCHES));
+            // Update batch size
+            currentBatchSize = getBatchSize();
           }
 
+          // Print out timeline when all requests are sent.
+          console.log(producerTimeline);
           res.json({
               message: `${results.length} files queued for processing`,
               files: results
