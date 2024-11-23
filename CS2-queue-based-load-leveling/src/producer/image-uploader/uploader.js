@@ -9,6 +9,12 @@ const app = express();
 const MAX_FILES_PER_REQUEST = 1000;
 const BATCH_SIZES = [5, 1, 2, 10, 20];
 
+// HELPER FUNCTIONS
+const getBatchSize = () => {
+  const randomIndex = Math.floor(Math.random() * BATCH_SIZES.length);
+  return BATCH_SIZES[randomIndex];
+};
+
 // Cấu hình multer để lưu file upload với tên file gốc
 const storage = multer.diskStorage({
   destination: function (req, file, cb) {
@@ -71,14 +77,13 @@ app.post('/upload/batch',
       }
 
       try {
-          // TODO: Remove fixed batch size.
-          const batchSize = 50;
+          const currentBatchSize = getBatchSize();
           const files = req.files;
           const results = [];
 
-          // TODO: Implement flunctuating batch size.
-          for (let i = 0; i < files.length; i += batchSize) {
-              const batch = files.slice(i, i + batchSize);
+          for (let i = 0; i < files.length;) {
+                const batch = files.slice(i, i + currentBatchSize);
+                i += batch.length;
               
               for (const file of batch) {
                   const fileInfo = {
