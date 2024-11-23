@@ -5,6 +5,9 @@ const path = require("path");
 const fs = require("fs");
 const rateLimit = require("express-rate-limit");
 const app = express();
+// CONSTANTS
+const MAX_FILES_PER_REQUEST = 1000;
+const BATCH_SIZES = [5, 1, 2, 10, 20];
 
 // Cấu hình multer để lưu file upload với tên file gốc
 const storage = multer.diskStorage({
@@ -59,47 +62,21 @@ async function connectQueue() {
 
 connectQueue();
 
-app.post("/upload", upload.single("image"), async (req, res) => {
-  if (!req.file) {
-    return res.status(400).send("No file uploaded.");
-  }
-
-  // Lưu thông tin file
-  const fileInfo = {
-    originalPath: req.file.path,
-    filename: req.file.filename,
-  };
-
-  console.log("filepath:", fileInfo.originalPath);
-  // Gửi thông tin file vào queue
-  channel.sendToQueue(
-    "image-processing-queue",
-    Buffer.from(JSON.stringify(fileInfo)),
-    {
-      persistent: true,
-    }
-  );
-
-  res.json({
-    message: "File uploaded and sent for processing",
-    fileId: req.file.filename,
-    filePath: req.file.path,
-  });
-});
-
 app.post('/upload/batch', 
   uploadLimiter,
-  upload.array('images', 1000),
+  upload.array('images', MAX_FILES_PER_REQUEST),
   async (req, res) => {
       if (!req.files || req.files.length === 0) {
           return res.status(400).send('No files uploaded.');
       }
 
       try {
+          // TODO: Remove fixed batch size.
           const batchSize = 50;
           const files = req.files;
           const results = [];
 
+          // TODO: Implement flunctuating batch size.
           for (let i = 0; i < files.length; i += batchSize) {
               const batch = files.slice(i, i + batchSize);
               
@@ -109,6 +86,7 @@ app.post('/upload/batch',
                       filename: file.filename,
                       timestamp: Date.now()
                   };
+                  // TODO: Push a timeline entry.
 
                   await channel.sendToQueue(
                       RABBITMQ_CONFIG.queue,
