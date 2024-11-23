@@ -13,8 +13,8 @@ $ cd CS2-competing-consumer
 $ node src/producer/image-uploader/uploader.js
 # Chạy 2-3 instances consumer: translate-consumer.js
 $ node src/consumer/translate-consumer/translate-consumer.js (chạy ở 2 terminal khác nhau)
-# Upload ảnh thông qua curl (mở 1 terminal khác): 
-$ curl -X POST http://localhost:3000/upload -F "image=@src/producer/uploads/i-1.png" (tương tự với i-2, i-3)
+# Upload nhièu instance ảnh thông qua curl (mở 1 terminal khác) - với x là số lần bạn muốn ảnh dó được gửi 
+$  curl -X POST "http://localhost:3000/upload?repeat=X" -F "image=@src/producer/uploads/i-2.png"
 ```
 ## Mô Tả
 

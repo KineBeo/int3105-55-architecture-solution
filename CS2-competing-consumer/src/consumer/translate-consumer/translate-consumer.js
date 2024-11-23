@@ -6,6 +6,27 @@ const { createPDF } = require('./services/pdf');
 const path = require('path');
 const fs = require('fs');
 
+let processedRequests = 0;
+let totalProcessingTime = 0;
+let startTime = Date.now();
+
+// Hàm reset tracking mỗi 1 phút
+function resetTracking() {
+    const currentTime = Date.now();
+    const requestsPerSecond = processedRequests / ((currentTime - startTime) / 1000);
+    
+    console.log('Tracking Metrics:');
+    console.log(`- Requests Processed per Second: ${requestsPerSecond.toFixed(2)}`);
+    console.log(`- Average Processing Time per Request: ${processedRequests > 0 ? (totalProcessingTime / processedRequests).toFixed(2) : 0} ms`);
+    
+    // Reset các biến
+    processedRequests = 0;
+    totalProcessingTime = 0;
+    startTime = currentTime;
+}
+
+// Chạy tracking mỗi 1 phút
+setInterval(resetTracking, 60000);
 
 async function startConsumer() {
     try {
@@ -29,6 +50,7 @@ async function startConsumer() {
         channel.consume(queue, async (msg) => {
             if (msg !== null) {
                 const fileInfo = JSON.parse(msg.content.toString());
+                const requestStartTime = Date.now();
                 console.log('Received message:', fileInfo.originalPath);
                 
                 try {
@@ -51,6 +73,13 @@ async function startConsumer() {
                     const outputPath = path.join(__dirname, 'output', `${fileInfo.filename}-${uniqueSuffix}.pdf`);
                     // console.log('Output path:', outputPath);
                     await createPDF(vietnameseText, outputPath);
+
+                    // TODO: Tracking
+                    const requestEndTime = Date.now();
+                    const processingTime = requestEndTime - requestStartTime;
+                    
+                    processedRequests++;
+                    totalProcessingTime += processingTime;
 
                     // Xác nhận đã xử lý message thành công
                     channel.ack(msg);
