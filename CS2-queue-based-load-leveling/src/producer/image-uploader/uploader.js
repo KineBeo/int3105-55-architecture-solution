@@ -8,7 +8,7 @@ const app = express();
 // CONSTANTS
 const MAX_FILES_PER_REQUEST = 1000;
 const DELAY_BETWEEN_BATCHES = 5000;
-const BATCH_SIZES = [5, 1, 2, 10, 20];
+const BATCH_SIZES = [1, 2, 5, 10, 15, 20, 25, 50];
 
 // HELPER FUNCTIONS
 const getBatchSize = () => {

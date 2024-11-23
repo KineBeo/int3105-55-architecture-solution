@@ -5,6 +5,30 @@ const { translate } = require("./services/translate");
 const { createPDF } = require("./services/pdf");
 const path = require("path");
 const fs = require("fs");
+// CONSTANTS
+const TIMELINE_INTERVAL = 5000;
+// STATES
+let firstRequestProcessedTime = null;
+let lastRequestProcessedTime = 0;
+let processedCount = 0;
+let processsingSpeedTimeline = [];
+let processingSpeedInterval = null;
+let connection = null;
+
+const pushProcessingSpeedEntry = () => {
+  const currentRequestProcessedTime = firstRequestProcessedTime !== null ? (Date.now() - firstRequestProcessedTime) / 1000 : 0;
+  const secondsPassedSinceLastEntry = currentRequestProcessedTime - lastRequestProcessedTime;
+
+  const entry = {
+    time: currentRequestProcessedTime,
+    speed: secondsPassedSinceLastEntry !== 0 ? (processedCount / secondsPassedSinceLastEntry).toFixed(2) : processedCount,
+  };
+  processsingSpeedTimeline.push(entry);
+
+  // Reset 
+  processedCount = 0;
+  lastRequestProcessedTime = currentRequestProcessedTime;
+};
 
 class TokenBucket {
   constructor(rate, capacity) {
@@ -48,7 +72,7 @@ const RABBITMQ_CONFIG = {
 async function startConsumer() {
   try {
     // Kết nối đến RabbitMQ
-    const connection = await amqp.connect(RABBITMQ_CONFIG.url);
+    connection = await amqp.connect(RABBITMQ_CONFIG.url);
     const channel = await connection.createChannel();
 
     // Đảm bảo queue tồn tại
@@ -60,7 +84,7 @@ async function startConsumer() {
     // // Prefetch chỉ 1 message tại một thời điểm
     // channel.prefetch(1);
 
-    const tokenBucket = new TokenBucket(10, 20); // 10 messages per second, bucket capacity 20
+    const tokenBucket = new TokenBucket(5, 20); // 10 messages per second, bucket capacity 20
         
     // Set prefetch
     channel.prefetch(5);
@@ -71,12 +95,22 @@ async function startConsumer() {
     channel.consume(
       RABBITMQ_CONFIG.queue,
       async (msg) => {
-
         if (!tokenBucket.consume()) {
             channel.nack(msg, false, true);
             return;
         }
+
+        // If this is the first message, start the processing speed timeline
+        if (firstRequestProcessedTime === null) {
+          pushProcessingSpeedEntry();
+          firstRequestProcessedTime = Date.now();
+          processingSpeedInterval = setInterval(() => {
+            pushProcessingSpeedEntry();
+          }, TIMELINE_INTERVAL);
+        }
+
         if (msg !== null) {
+          processedCount++;
           const fileInfo = JSON.parse(msg.content.toString());
           console.log("Received message:", fileInfo.originalPath);
 
@@ -125,6 +159,9 @@ startConsumer().catch(console.error);
 process.on("SIGINT", async () => {
   try {
     await connection.close();
+    clearInterval(processingSpeedInterval);
+    console.log("Shutdown successfully");
+    console.log("Processing speed timeline:\n", processsingSpeedTimeline);
     process.exit(0);
   } catch (error) {
     console.error("Error during shutdown:", error);
